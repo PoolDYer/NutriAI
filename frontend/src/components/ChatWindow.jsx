@@ -35,7 +35,7 @@ const MessageBubble = ({ message, isBestPayload }) => {
     );
 };
 
-const ChatWindow = ({ conversationId, onConversationCreated }) => {
+const ChatWindow = ({ conversationId, onConversationCreated, user }) => {
     const [inputValue, setInputValue] = useState('');
     const messagesEndRef = useRef(null);
     const queryClient = useQueryClient();
@@ -57,6 +57,7 @@ const ChatWindow = ({ conversationId, onConversationCreated }) => {
     const mutation = useMutation(
         async (newMsg) => {
             let targetId = conversationId;
+            let isNewConversation = false;
 
             // 1. Create Conversation if new
             if (conversationId === 'new-conversation') {
@@ -68,6 +69,7 @@ const ChatWindow = ({ conversationId, onConversationCreated }) => {
                 if (!createRes.ok) throw new Error('Failed to create conversation');
                 const convData = await createRes.json();
                 targetId = convData.id;
+                isNewConversation = true;
 
                 // Notify parent
                 if (onConversationCreated) onConversationCreated(targetId);
@@ -80,7 +82,19 @@ const ChatWindow = ({ conversationId, onConversationCreated }) => {
                 body: JSON.stringify(newMsg),
             });
             if (!res.ok) throw new Error('Failed to send');
-            return res.json();
+            const messageData = await res.json();
+            
+            // 3. Update conversation title if first message
+            if (isNewConversation && newMsg.content) {
+                const title = newMsg.content.substring(0, 50) + (newMsg.content.length > 50 ? '...' : '');
+                await fetch(`/api/conversations/${targetId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title })
+                }).catch(() => {}); // Ignore errors on title update
+            }
+            
+            return messageData;
         },
         {
             onMutate: async (newMessage) => {
@@ -102,7 +116,8 @@ const ChatWindow = ({ conversationId, onConversationCreated }) => {
             onSettled: () => {
                 // Invalidate original ID (clears 'new') AND new ID if possible, but simplest is to invalidate current
                 queryClient.invalidateQueries(['messages', conversationId]);
-                queryClient.invalidateQueries('conversations'); // Refresh sidebar
+                // FIX: Invalidate the specific user conversations key
+                queryClient.invalidateQueries(['conversations', user?.id]);
             },
         }
     );

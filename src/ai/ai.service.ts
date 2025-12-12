@@ -14,7 +14,7 @@ export interface AIResponse {
 
 @Injectable()
 export class AiService {
-  private readonly apiKey = 'AIzaSyCFV73GS4A0ZPd409zv_ny-iBvyeOD5_4s';
+  private readonly apiKey = 'AIzaSyDDaqJhagrbOb33Y4K4CN0I81rUCLU-m3E';
   private readonly modelName = 'gemini-2.5-flash';
 
   constructor(private supabase: SupabaseClient) { }
@@ -25,13 +25,45 @@ export class AiService {
     userMessage: string
   ): Promise<AIResponse> {
 
-    // 1. Fetch Context (Optional refinement: get history here if desired)
-    // For now, we'll send the user message directly to the LLM with a system prompt.
+    // 1. Recover History (Short-term memory)
+    // Fetch last 10 messages, ordered newest to oldest
+    const { data: historyData, error: historyError } = await this.supabase
+      .from('messages')
+      .select('role, content')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: false })
+      .limit(10);
 
-    // 2. Call Gemini API
-    const replyText = await this.callLLMProvider(userMessage, userId);
+    if (historyError) {
+      console.error('Error retrieving history:', historyError);
+    }
 
-    // 3. Save Assistant Message To DB
+    // 2. Format for Gemini (Oldest -> Newest)
+    const pastMessages = (historyData || []).reverse().map((msg) => ({
+      role: msg.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: msg.content }]
+    }));
+
+    // 3. Ensure consistency:
+    // If the controller already saved the new message, it should be in 'pastMessages' (at the end).
+    // Logic: check the last message. If it matches 'userMessage', we are good.
+    // If not (fetched before insert?? or weird race), append it.
+    const lastMsg = pastMessages[pastMessages.length - 1];
+    const isUserMsgMissing = !lastMsg || lastMsg.role !== 'user' || lastMsg.parts[0].text !== userMessage;
+
+    if (isUserMsgMissing && userMessage) {
+      pastMessages.push({ role: 'user', parts: [{ text: userMessage }] });
+    }
+
+    // 4. System Instruction
+    const systemInstruction = {
+      parts: [{ text: "Eres NutriAI, un experto en nutrición que usa ingredientes locales y accesibles. Responde de forma amable y profesional. Tus respuestas deben ser SIEMPRE en español. Proporciona guías detalladas, recomendaciones y menús si es necesario." }]
+    };
+
+    // 5. Call Gemini with Context
+    const replyText = await this.callLLMProvider(pastMessages, systemInstruction);
+
+    // 6. Save Assistant Response
     await this.saveMessage(conversationId, 'assistant', replyText);
 
     return {
@@ -39,7 +71,7 @@ export class AiService {
     };
   }
 
-  private async callLLMProvider(userMessage: string, userId: string): Promise<string> {
+  private async callLLMProvider(contents: any[], systemInstruction: any): Promise<string> {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.modelName}:generateContent?key=${this.apiKey}`;
 
@@ -49,24 +81,8 @@ export class AiService {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [{
-                text: `System: Eres NutriAI, un asistente nutricionista experto, empático y profesional.
-Tus respuestas deben ser SIEMPRE en español.
-Tu objetivo es proporcionar guías de nutrición detalladas, precisas y personalizadas.
-Cuando un usuario haga una consulta, no des respuestas genéricas. Analiza su solicitud y proporciona:
-1. Explicación clara del concepto.
-2. Recomendaciones específicas de alimentos o hábitos.
-3. Si es apropiado, un ejemplo de menú o plan breve.
-4. Advertencias relevantes (ej. alergias, condiciones médicas).
-Mantén un tono motivador pero basado en ciencia.
-
-User: ${userMessage}`
-              }]
-            }
-          ]
+          contents: contents,
+          systemInstruction: systemInstruction
         })
       });
 
@@ -94,19 +110,19 @@ User: ${userMessage}`
       .single();
 
     if (data) return data.id;
-    throw new Error('No system user found to send format AI messages.');
+    // Fallback: This shouldn't happen if users exist.
+    console.warn('No system user found. Using null sender (might fail constraint).');
+    return null;
   }
 
   private async saveMessage(convId: string, role: string, content: string) {
-    // For assistant messages, we need a sender_id. We'll use a system user.
-    // In a real app, 'system' might be a special UUID constant seeded in DB.
     const senderId = await this.getSystemUserId();
 
     await this.supabase.from('messages').insert({
       conversation_id: convId,
       content,
       sender_id: senderId,
-      metadata: { role } // Store role in metadata for UI if needed
+      metadata: { role }
     });
   }
 }

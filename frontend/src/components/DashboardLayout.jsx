@@ -5,11 +5,14 @@ import ChatWindow from './ChatWindow';
 import { Menu, User, Settings, LogOut, ChevronRight, ChevronLeft } from 'lucide-react';
 
 // Mock Fetcher
-const fetchConversations = async () => {
+const fetchConversations = async (userId) => {
     // Replace with actual API call
-    const response = await fetch('/api/conversations');
+    const queryParams = userId ? `?userId=${userId}` : '';
+    const response = await fetch(`/api/conversations${queryParams}`);
     if (!response.ok) throw new Error('Network response was not ok');
-    return response.json();
+    const responseData = await response.json();
+    // Handle both array response and object with data property
+    return Array.isArray(responseData) ? { data: responseData } : responseData;
 };
 
 const DashboardLayout = ({ user }) => {
@@ -17,7 +20,16 @@ const DashboardLayout = ({ user }) => {
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const [activeConversationId, setActiveConversationId] = useState(null);
 
-    const { data: conversations, isLoading, error } = useQuery('conversations', fetchConversations);
+    const { data: conversationsData, isLoading, error, refetch: refetchConversations } = useQuery(
+        ['conversations', user?.id],
+        () => fetchConversations(user?.id),
+        { 
+            enabled: !!user?.id,
+            refetchInterval: 5000 // Refetch every 5 seconds to keep history updated
+        }
+    );
+    
+    const conversations = conversationsData?.data || [];
 
     return (
         <div className="flex h-screen bg-gray-50 text-gray-900 font-sans overflow-hidden">
@@ -52,7 +64,7 @@ const DashboardLayout = ({ user }) => {
 
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                     <ConversationSidebar
-                        conversations={conversations?.data || []}
+                        conversations={conversations}
                         isLoading={isLoading}
                         activeId={activeConversationId}
                         onSelect={setActiveConversationId}
@@ -100,7 +112,11 @@ const DashboardLayout = ({ user }) => {
                         {activeConversationId ? (
                             <ChatWindow
                                 conversationId={activeConversationId}
-                                onConversationCreated={setActiveConversationId}
+                                onConversationCreated={(convId) => {
+                                    setActiveConversationId(convId);
+                                    refetchConversations(); // Refresh conversation list
+                                }}
+                                user={user}
                             />
                         ) : (
                             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-gray-500">

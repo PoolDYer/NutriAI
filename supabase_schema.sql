@@ -47,7 +47,9 @@ CREATE TABLE public.conversations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     patient_id UUID NOT NULL REFERENCES public.users(id),
     nutritionist_id UUID REFERENCES public.users(id), -- Optional if handled by AI initially
+    title TEXT,
     started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     status TEXT DEFAULT 'active'
 );
 

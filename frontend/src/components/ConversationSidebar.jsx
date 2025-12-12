@@ -49,12 +49,12 @@ const ConversationSidebar = ({ conversations = [], isLoading, activeId, onSelect
                             <div className="flex-1 min-w-0">
                                 <div className="flex justify-between items-baseline">
                                     <h4 className={`text-sm font-medium truncate ${activeId === conv.id ? 'text-gray-900' : 'text-gray-700'}`}>
-                                        {conv.title || 'Nueva conversación'}
+                                        {conv.title || (conv.lastMessage ? conv.lastMessage.substring(0, 40) : 'Nueva conversación')}
                                     </h4>
                                     {conv.pinned && <Pin size={12} className="text-orange-400 fill-orange-400 ml-1" />}
                                 </div>
                                 <p className="text-xs text-gray-500 truncate mt-0.5 line-clamp-1">
-                                    {conv.lastMessage || 'Sin mensajes previos...'}
+                                    {conv.lastMessage ? conv.lastMessage.substring(0, 60) : 'Sin mensajes'}
                                 </p>
                                 <span className="text-[10px] text-gray-400 mt-1 block">
                                     {conv.updatedAt ? format(new Date(conv.updatedAt), 'MMM d, h:mm a') : ''}
